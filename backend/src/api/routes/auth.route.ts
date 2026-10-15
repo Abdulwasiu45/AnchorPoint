@@ -2,11 +2,14 @@ import { Router, Request, Response } from 'express';
 import { RedisService } from '../../services/redis.service';
 import { getChallenge, getToken, refreshToken } from '../controllers/auth.controller';
 import { sep10ChallengeLimiter } from '../middleware/rate-limit.middleware';
+import { sepFlowMetricsMiddleware } from '../middleware/sep-flow-metrics.middleware';
 
 const challengeLimiter = (req: Request, res: Response, next: any) =>
   typeof sep10ChallengeLimiter === 'function' ? sep10ChallengeLimiter(req, res, next) : next();
 
 const router = Router();
+
+router.use(sepFlowMetricsMiddleware('sep10'));
 
 // Mock Redis client for demonstration
 // In a real implementation, you would inject the actual Redis client
