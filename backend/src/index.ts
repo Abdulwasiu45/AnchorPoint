@@ -47,6 +47,7 @@ import { redis } from './lib/redis';
 import { validateStorageConfigOnStartup } from './services/storage-provider.service';
 import { uploadExpiryScheduler } from './workers/upload-expiry.scheduler';
 import { dbMetricsScheduler } from './workers/db-metrics.scheduler';
+import { transactionReconcileScheduler } from './workers/transaction-reconcile.scheduler';
 import { initSocket } from './lib/socket';
 import { kycExpiryScheduler } from './workers/kyc-expiry.scheduler';
 import { dataRetentionScheduler } from './workers/data-retention.scheduler';
@@ -79,6 +80,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   dataRetentionScheduler.stop();
   cleanupWorker.stop();
   dbMetricsScheduler.stop();
+  transactionReconcileScheduler.stop();
 
   // Stop accepting new HTTP traffic; let in-flight requests finish.
   if (server) {
@@ -466,6 +468,7 @@ if (process.env.NODE_ENV !== 'test') {
           kycExpiryScheduler.start();
           dataRetentionScheduler.start();
           dbMetricsScheduler.start();
+          transactionReconcileScheduler.start();
           cleanupWorker.start();
         });
       });

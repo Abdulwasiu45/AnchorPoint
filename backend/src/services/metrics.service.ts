@@ -17,6 +17,7 @@ export class MetricsService {
   private sepTransactionsTotal: Counter<string>;
   private sepTransactionDuration: Histogram<string>;
   private kycVerificationTotal: Counter<string>;
+  private transactionReconciliationTotal: Counter<string>;
 
   constructor() {
     this.registry = new promClient.Registry();
@@ -151,6 +152,14 @@ export class MetricsService {
       labelNames: ['status', 'provider'] as const,
       registers: [this.registry],
     });
+
+    // #1342: Outcomes of the pending_stellar transaction reconciliation job
+    this.transactionReconciliationTotal = new promClient.Counter({
+      name: 'transaction_reconciliation_total',
+      help: 'Total number of transaction status reconciliations by outcome',
+      labelNames: ['outcome'] as const,
+      registers: [this.registry],
+    });
   }
 
   /**
@@ -172,6 +181,13 @@ export class MetricsService {
    */
   incrementKycVerification(status: string, provider: string = 'internal'): void {
     this.kycVerificationTotal.inc({ status, provider });
+  }
+
+  /**
+   * #1342: Record a transaction reconciliation outcome
+   */
+  incrementTransactionReconciliation(outcome: string): void {
+    this.transactionReconciliationTotal.inc({ outcome });
   }
 
   /**
