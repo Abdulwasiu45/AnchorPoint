@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import React from 'react';
 import { 
   TransactionHistory, 
@@ -132,4 +132,59 @@ describe('TransactionHistory - Virtualized Transaction History Table for 10,000+
       expect(innerContainer).toHaveStyle({ height: '56px' });
     });
   });
+
+  describe('mobile-responsive card layout and expand/collapse', () => {
+    const sampleTxs = [
+      {
+        id: 'TX-MOBILE-1',
+        hash: '0x1234567890abcdef',
+        type: 'Deposit' as const,
+        asset: 'USDC',
+        amount: '250.00',
+        counterparty: 'GABC...1234',
+        status: 'Completed' as const,
+        date: '2024-03-22',
+        timestamp: 1710500000,
+        fee: '0.00001 XLM'
+      }
+    ];
+
+    it('renders key fields on mobile card and hides secondary fields by default', () => {
+      render(<TransactionHistory initialData={sampleTxs} totalInitialCount={1} />);
+
+      // Mobile card should be rendered
+      expect(screen.getByTestId('tx-card-0')).toBeInTheDocument();
+
+      // Key fields visible without horizontal scrolling
+      expect(screen.getByTestId('tx-card-status-0')).toHaveTextContent('Completed');
+      expect(screen.getByTestId('tx-card-amount-0')).toHaveTextContent('+250.00 USDC');
+      expect(screen.getByTestId('tx-card-date-0')).toHaveTextContent('2024-03-22');
+
+      // Secondary fields collapsed
+      expect(screen.queryByTestId('tx-card-secondary-0')).not.toBeInTheDocument();
+    });
+
+    it('toggles secondary fields when clicking expand/collapse button', () => {
+      render(<TransactionHistory initialData={sampleTxs} totalInitialCount={1} />);
+
+      const toggleBtn = screen.getByTestId('tx-card-expand-btn-0');
+      expect(toggleBtn).toHaveAttribute('aria-expanded', 'false');
+
+      // Expand secondary fields
+      fireEvent.click(toggleBtn);
+      expect(toggleBtn).toHaveAttribute('aria-expanded', 'true');
+      const secondaryDetails = screen.getByTestId('tx-card-secondary-0');
+      expect(secondaryDetails).toBeInTheDocument();
+      expect(within(secondaryDetails).getByText('TX-MOBILE-1')).toBeInTheDocument();
+      expect(within(secondaryDetails).getByText('0x1234567890abcdef')).toBeInTheDocument();
+      expect(within(secondaryDetails).getByText('GABC...1234')).toBeInTheDocument();
+      expect(within(secondaryDetails).getByText('0.00001 XLM')).toBeInTheDocument();
+
+      // Collapse secondary fields
+      fireEvent.click(toggleBtn);
+      expect(toggleBtn).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByTestId('tx-card-secondary-0')).not.toBeInTheDocument();
+    });
+  });
 });
+

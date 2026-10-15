@@ -6,13 +6,14 @@ import {
   RefreshCw, 
   Search, 
   Zap, 
-  SlidersHorizontal,
   Flame, 
   Coins, 
   CheckCircle2, 
   Clock, 
   AlertCircle,
-  ExternalLink
+  ExternalLink,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 export interface Transaction {
@@ -93,8 +94,21 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState<string>('All');
   const [selectedStatus, setSelectedStatus] = useState<string>('All');
+  const [expandedTxIds, setExpandedTxIds] = useState<Set<string>>(new Set());
 
   const parentRef = useRef<HTMLDivElement>(null);
+
+  const toggleExpand = (id: string) => {
+    setExpandedTxIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
 
   // Filtered dataset
   const filteredTransactions = useMemo(() => {
@@ -123,6 +137,21 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
   });
 
   const virtualRows = rowVirtualizer.getVirtualItems();
+  const itemsToRender = virtualRows.length > 0
+    ? virtualRows.map(vr => ({
+        index: vr.index,
+        key: vr.key,
+        start: vr.start,
+        size: vr.size,
+        tx: filteredTransactions[vr.index]
+      }))
+    : filteredTransactions.slice(0, overscan).map((tx, idx) => ({
+        index: idx,
+        key: tx.id,
+        start: idx * rowHeight,
+        size: rowHeight,
+        tx
+      }));
 
   const handleToggleVolume = (count: number) => {
     setDataCount(count);
@@ -149,7 +178,7 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
           </div>
 
           {/* Quick dataset switcher */}
-          <div className="flex items-center gap-2 bg-slate-950 p-1.5 rounded-xl border border-slate-800 text-xs">
+          <div className="flex items-center gap-2 bg-slate-950 p-1.5 rounded-xl border border-slate-800 text-xs flex-wrap">
             <span className="text-slate-400 px-2 font-medium">Dataset:</span>
             <button
               onClick={() => handleToggleVolume(100)}
@@ -226,7 +255,7 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
             </div>
 
             <span className="text-xs text-slate-500 font-mono ml-auto">
-              DOM Active: <strong className="text-emerald-400">{virtualRows.length}</strong> / {filteredTransactions.length}
+              DOM Active: <strong className="text-emerald-400">{itemsToRender.length}</strong> / {filteredTransactions.length}
             </span>
           </div>
         </div>
@@ -234,8 +263,11 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
 
       {/* Virtualized Table Container */}
       <div className="glass-card border border-slate-800 overflow-hidden shadow-2xl">
-        {/* Fixed Header */}
-        <div className="grid grid-cols-12 gap-4 px-6 py-3.5 bg-slate-950/80 border-b border-slate-800 text-xs uppercase tracking-wider font-semibold text-slate-400">
+        {/* Fixed Header: hidden on mobile (<768px), visible on desktop (>=768px) */}
+        <div 
+          data-testid="tx-table-header"
+          className="hidden md:grid grid-cols-12 gap-4 px-6 py-3.5 bg-slate-950/80 border-b border-slate-800 text-xs uppercase tracking-wider font-semibold text-slate-400"
+        >
           <div className="col-span-2">Tx ID / Type</div>
           <div className="col-span-3">Hash & Counterparty</div>
           <div className="col-span-2 text-right">Amount</div>
@@ -264,85 +296,200 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
                 position: 'relative'
               }}
             >
-              {virtualRows.map(virtualRow => {
-                const tx = filteredTransactions[virtualRow.index];
+              {itemsToRender.map(item => {
+                const tx = item.tx;
                 if (!tx) return null;
+                const isExpanded = expandedTxIds.has(tx.id);
 
                 return (
                   <div
-                    key={virtualRow.key}
-                    data-index={virtualRow.index}
-                    data-testid={`tx-row-${virtualRow.index}`}
-                    className="absolute top-0 left-0 w-full grid grid-cols-12 gap-4 items-center px-6 border-b border-slate-800/60 hover:bg-slate-900/60 transition-colors text-sm"
+                    key={item.key}
+                    data-index={item.index}
+                    data-testid={`tx-row-${item.index}`}
+                    className="absolute top-0 left-0 w-full border-b border-slate-800/60 hover:bg-slate-900/60 transition-colors text-sm"
                     style={{
-                      height: `${virtualRow.size}px`,
-                      transform: `translateY(${virtualRow.start}px)`
+                      transform: `translateY(${item.start}px)`
                     }}
                   >
-                    {/* Tx ID & Type */}
-                    <div className="col-span-2 flex items-center gap-2">
-                      <div className={`p-1.5 rounded-lg ${
-                        tx.type === 'Deposit' ? 'bg-emerald-500/10 text-emerald-400' :
-                        tx.type === 'Withdrawal' ? 'bg-rose-500/10 text-rose-400' :
-                        tx.type === 'Liquidation' ? 'bg-amber-500/10 text-amber-400' :
-                        tx.type === 'Swap' ? 'bg-blue-500/10 text-blue-400' :
-                        'bg-purple-500/10 text-purple-400'
-                      }`}>
-                        {tx.type === 'Deposit' && <ArrowDownLeft size={14} />}
-                        {tx.type === 'Withdrawal' && <ArrowUpRight size={14} />}
-                        {tx.type === 'Liquidation' && <Flame size={14} />}
-                        {tx.type === 'Swap' && <RefreshCw size={14} />}
-                        {tx.type === 'Mint' && <Coins size={14} />}
+                    {/* Desktop View (>= 768px / md): tabular row */}
+                    <div 
+                      data-testid={`tx-desktop-row-${item.index}`}
+                      className="hidden md:grid grid-cols-12 gap-4 items-center px-6 h-14"
+                    >
+                      {/* Tx ID & Type */}
+                      <div className="col-span-2 flex items-center gap-2">
+                        <div className={`p-1.5 rounded-lg ${
+                          tx.type === 'Deposit' ? 'bg-emerald-500/10 text-emerald-400' :
+                          tx.type === 'Withdrawal' ? 'bg-rose-500/10 text-rose-400' :
+                          tx.type === 'Liquidation' ? 'bg-amber-500/10 text-amber-400' :
+                          tx.type === 'Swap' ? 'bg-blue-500/10 text-blue-400' :
+                          'bg-purple-500/10 text-purple-400'
+                        }`}>
+                          {tx.type === 'Deposit' && <ArrowDownLeft size={14} />}
+                          {tx.type === 'Withdrawal' && <ArrowUpRight size={14} />}
+                          {tx.type === 'Liquidation' && <Flame size={14} />}
+                          {tx.type === 'Swap' && <RefreshCw size={14} />}
+                          {tx.type === 'Mint' && <Coins size={14} />}
+                        </div>
+                        <div>
+                          <span className="font-mono text-xs font-semibold text-slate-200 block">
+                            {tx.id}
+                          </span>
+                          <span className="text-[11px] text-slate-500">{tx.type}</span>
+                        </div>
                       </div>
-                      <div>
-                        <span className="font-mono text-xs font-semibold text-slate-200 block">
-                          {tx.id}
+
+                      {/* Hash & Counterparty */}
+                      <div className="col-span-3">
+                        <div className="flex items-center gap-1.5 text-xs font-mono text-slate-300">
+                          <span className="truncate max-w-[140px]">{tx.hash}</span>
+                          <ExternalLink size={11} className="text-slate-500 hover:text-primary cursor-pointer" />
+                        </div>
+                        <span className="text-[10px] font-mono text-slate-500 block truncate">
+                          {tx.counterparty}
                         </span>
-                        <span className="text-[11px] text-slate-500">{tx.type}</span>
+                      </div>
+
+                      {/* Amount */}
+                      <div className="col-span-2 text-right">
+                        <span className="font-mono font-bold text-slate-100 block">
+                          {tx.type === 'Withdrawal' ? `-${tx.amount}` : `+${tx.amount}`} {tx.asset}
+                        </span>
+                      </div>
+
+                      {/* Status */}
+                      <div className="col-span-2">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                          tx.status === 'Completed' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                          tx.status === 'Pending' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                          tx.status === 'Processing' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
+                          'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                        }`}>
+                          {tx.status === 'Completed' && <CheckCircle2 size={10} />}
+                          {tx.status === 'Pending' && <Clock size={10} />}
+                          {tx.status === 'Failed' && <AlertCircle size={10} />}
+                          {tx.status}
+                        </span>
+                      </div>
+
+                      {/* Date */}
+                      <div className="col-span-2 text-xs text-slate-400 font-mono">
+                        {tx.date}
+                      </div>
+
+                      {/* Fee */}
+                      <div className="col-span-1 text-right text-[11px] text-slate-500 font-mono">
+                        {tx.fee}
                       </div>
                     </div>
 
-                    {/* Hash & Counterparty */}
-                    <div className="col-span-3">
-                      <div className="flex items-center gap-1.5 text-xs font-mono text-slate-300">
-                        <span className="truncate max-w-[140px]">{tx.hash}</span>
-                        <ExternalLink size={11} className="text-slate-500 hover:text-primary cursor-pointer" />
+                    {/* Mobile Card Layout (< 768px / md:hidden) */}
+                    <div 
+                      data-testid={`tx-card-${item.index}`}
+                      className="md:hidden p-4 space-y-3"
+                    >
+                      {/* Key Fields: Status, Amount, Asset */}
+                      <div className="flex items-center justify-between gap-2">
+                        {/* Status badge */}
+                        <span 
+                          data-testid={`tx-card-status-${item.index}`}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider ${
+                            tx.status === 'Completed' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                            tx.status === 'Pending' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                            tx.status === 'Processing' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
+                            'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                          }`}
+                        >
+                          {tx.status === 'Completed' && <CheckCircle2 size={12} />}
+                          {tx.status === 'Pending' && <Clock size={12} />}
+                          {tx.status === 'Failed' && <AlertCircle size={12} />}
+                          {tx.status}
+                        </span>
+
+                        {/* Amount & Asset */}
+                        <div className="text-right" data-testid={`tx-card-amount-${item.index}`}>
+                          <span className="font-mono font-bold text-slate-100 text-sm">
+                            {tx.type === 'Withdrawal' ? `-${tx.amount}` : `+${tx.amount}`} {tx.asset}
+                          </span>
+                        </div>
                       </div>
-                      <span className="text-[10px] font-mono text-slate-500 block truncate">
-                        {tx.counterparty}
-                      </span>
-                    </div>
 
-                    {/* Amount */}
-                    <div className="col-span-2 text-right">
-                      <span className="font-mono font-bold text-slate-100 block">
-                        {tx.type === 'Withdrawal' ? `-${tx.amount}` : `+${tx.amount}`} {tx.asset}
-                      </span>
-                    </div>
+                      {/* Key Fields: Date and Expand Toggle */}
+                      <div className="flex items-center justify-between pt-1">
+                        {/* Date */}
+                        <span 
+                          data-testid={`tx-card-date-${item.index}`}
+                          className="text-xs text-slate-400 font-mono"
+                        >
+                          {tx.date}
+                        </span>
 
-                    {/* Status */}
-                    <div className="col-span-2">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                        tx.status === 'Completed' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                        tx.status === 'Pending' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
-                        tx.status === 'Processing' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
-                        'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                      }`}>
-                        {tx.status === 'Completed' && <CheckCircle2 size={10} />}
-                        {tx.status === 'Pending' && <Clock size={10} />}
-                        {tx.status === 'Failed' && <AlertCircle size={10} />}
-                        {tx.status}
-                      </span>
-                    </div>
+                        {/* Expand/Collapse Toggle Button for Secondary Fields */}
+                        <button
+                          type="button"
+                          onClick={() => toggleExpand(tx.id)}
+                          aria-expanded={isExpanded}
+                          aria-label={isExpanded ? `Collapse details for ${tx.id}` : `Expand details for ${tx.id}`}
+                          data-testid={`tx-card-expand-btn-${item.index}`}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:border-slate-700 transition-colors"
+                        >
+                          <span>{isExpanded ? 'Hide Details' : 'Details'}</span>
+                          {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                        </button>
+                      </div>
 
-                    {/* Date */}
-                    <div className="col-span-2 text-xs text-slate-400 font-mono">
-                      {tx.date}
-                    </div>
+                      {/* Collapsible Secondary Fields */}
+                      {isExpanded && (
+                        <div 
+                          data-testid={`tx-card-secondary-${item.index}`}
+                          className="pt-3 mt-1 border-t border-slate-800/80 space-y-2 text-xs"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-400 font-medium">Tx ID:</span>
+                            <span className="font-mono font-semibold text-slate-200">{tx.id}</span>
+                          </div>
 
-                    {/* Fee */}
-                    <div className="col-span-1 text-right text-[11px] text-slate-500 font-mono">
-                      {tx.fee}
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-400 font-medium">Type:</span>
+                            <div className="flex items-center gap-1.5">
+                              <div className={`p-1 rounded ${
+                                tx.type === 'Deposit' ? 'bg-emerald-500/10 text-emerald-400' :
+                                tx.type === 'Withdrawal' ? 'bg-rose-500/10 text-rose-400' :
+                                tx.type === 'Liquidation' ? 'bg-amber-500/10 text-amber-400' :
+                                tx.type === 'Swap' ? 'bg-blue-500/10 text-blue-400' :
+                                'bg-purple-500/10 text-purple-400'
+                              }`}>
+                                {tx.type === 'Deposit' && <ArrowDownLeft size={12} />}
+                                {tx.type === 'Withdrawal' && <ArrowUpRight size={12} />}
+                                {tx.type === 'Liquidation' && <Flame size={12} />}
+                                {tx.type === 'Swap' && <RefreshCw size={12} />}
+                                {tx.type === 'Mint' && <Coins size={12} />}
+                              </div>
+                              <span className="text-slate-300 font-medium">{tx.type}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-slate-400 font-medium">Hash:</span>
+                            <div className="flex items-center gap-1.5 font-mono text-slate-300">
+                              <span className="truncate max-w-[140px] sm:max-w-[200px]">{tx.hash}</span>
+                              <ExternalLink size={12} className="text-slate-500 hover:text-primary cursor-pointer shrink-0" />
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-slate-400 font-medium">Counterparty:</span>
+                            <span className="font-mono text-slate-400 truncate max-w-[160px] sm:max-w-[220px]">
+                              {tx.counterparty}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-400 font-medium">Fee:</span>
+                            <span className="font-mono text-slate-400">{tx.fee}</span>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
