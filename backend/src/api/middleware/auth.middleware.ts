@@ -148,6 +148,69 @@ export const requireAuthLevel = (requiredLevel: 'partial' | 'medium' | 'full') =
   };
 };
 
+export type AdminRole = 'SUPER_ADMIN' | 'OPS' | 'READ_ONLY';
+
+export interface AdminRequest extends Request {
+  admin?: {
+    id: string;
+    email: string;
+    role: AdminRole;
+  };
+}
+
+// Middleware restricting a route to admins holding one of the given roles
+export const requireRole = (...roles: AdminRole[]) => {
+  return async (req: AdminRequest, res: Response, next: NextFunction) => {
+    if (!req.admin) {
+      const token = extractBearerToken(req.headers.authorization);
+      if (!token) {
+        return res.status(401).json({
+          status: 'error',
+          message: 'Authentication required. No token provided.'
+        });
+      }
+
+      let subject: string;
+      try {
+        subject = (await verifyToken(token)).sub;
+      } catch (error) {
+        return res.status(401).json({
+          status: 'error',
+          message: 'Invalid or expired token.'
+        });
+      }
+
+      try {
+        const { default: prisma } = await import('../../lib/prisma');
+        const admin = await prisma.adminUser.findFirst({
+          where: { OR: [{ id: subject }, { email: subject }] },
+          select: { id: true, email: true, role: true },
+        });
+
+        if (!admin) {
+          return res.status(403).json({
+            status: 'error',
+            message: 'Admin access required.'
+          });
+        }
+
+        req.admin = { id: admin.id, email: admin.email, role: admin.role as AdminRole };
+      } catch (error) {
+        return res.status(500).json({ status: 'error', message: 'Internal server error validating admin role' });
+      }
+    }
+
+    if (!roles.includes(req.admin.role)) {
+      return res.status(403).json({
+        status: 'error',
+        message: `Insufficient role. Required one of: ${roles.join(', ')}, Current: ${req.admin.role}`
+      });
+    }
+
+    return next();
+  };
+};
+
 export const webhookSignatureMiddleware = (req: Request, res: Response, next: NextFunction) => {
   const signature = req.headers['x-anchorpoint-signature'] as string | undefined;
   const timestamp = req.headers['x-anchorpoint-timestamp'] as string | undefined;

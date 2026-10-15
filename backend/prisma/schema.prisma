@@ -32,10 +32,17 @@ model User {
   @@index([publicKey])
 }
 
+enum AdminRole {
+  SUPER_ADMIN
+  OPS
+  READ_ONLY
+}
+
 model AdminUser {
   id                  String                    @id @default(uuid())
   email               String                    @unique
   passwordHash        String
+  role                AdminRole                 @default(READ_ONLY)
   createdAt           DateTime                  @default(now())
   updatedAt           DateTime                  @updatedAt
   passwordResetTokens AdminPasswordResetToken[]
@@ -528,6 +535,7 @@ model AdminUser {
   id                  String                    @id @default(uuid())
   email               String                    @unique
   passwordHash        String
+  role                AdminRole                 @default(READ_ONLY)
   createdAt           DateTime                  @default(now())
   updatedAt           DateTime                  @updatedAt
   passwordResetTokens AdminPasswordResetToken[]
@@ -970,6 +978,7 @@ model AdminUser {
   id                  String                    @id @default(uuid())
   email               String                    @unique
   passwordHash        String
+  role                AdminRole                 @default(READ_ONLY)
   createdAt           DateTime                  @default(now())
   updatedAt           DateTime                  @updatedAt
   passwordResetTokens AdminPasswordResetToken[]
