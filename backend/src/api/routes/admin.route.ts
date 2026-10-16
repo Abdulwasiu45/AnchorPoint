@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { validate } from '../middleware/validate.middleware';
+import { requireRole } from '../middleware/auth.middleware';
 import {
   switchNetworkSchema,
   patchTransactionSchema,
@@ -30,6 +31,10 @@ const adminPasswordResetService = new AdminPasswordResetService();
 // Singleton service instance
 const sep31Service = new SEP31Service(createCallbackNotifier());
 
+// Admin RBAC: read endpoints accept every role, destructive ones need SUPER_ADMIN or OPS
+const requireReadAccess = requireRole('SUPER_ADMIN', 'OPS', 'READ_ONLY');
+const requireWriteAccess = requireRole('SUPER_ADMIN', 'OPS');
+
 /**
  * @swagger
  * /admin/network:
@@ -48,7 +53,7 @@ const sep31Service = new SEP31Service(createCallbackNotifier());
  *                   type: string
  *                   example: TESTNET
  */
-router.get('/network', (req: Request, res: Response) => {
+router.get('/network', requireReadAccess, (req: Request, res: Response) => {
   res.json({ network: stellarService.getNetwork() });
 });
 
@@ -76,7 +81,7 @@ router.get('/network', (req: Request, res: Response) => {
  *       400:
  *         description: Invalid network type
  */
-router.post('/network', validate({ body: switchNetworkSchema }), async (req: Request, res: Response) => {
+router.post('/network', requireWriteAccess, validate({ body: switchNetworkSchema }), async (req: Request, res: Response) => {
   const { network } = req.body;
 
   try {
@@ -130,7 +135,7 @@ router.post('/network', validate({ body: switchNetworkSchema }), async (req: Req
  *       200:
  *         description: Transaction status updated successfully
  */
-router.patch('/transactions/:id', validate({ body: patchTransactionSchema }), async (req: Request, res: Response) => {
+router.patch('/transactions/:id', requireWriteAccess, validate({ body: patchTransactionSchema }), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { status, stellar_transaction_id, external_transaction_id, amount_out, amount_fee } = req.body;
@@ -294,7 +299,7 @@ const adminTransactionsQuerySchema = z.object({
  *       500:
  *         description: Internal server error
  */
-router.get('/transactions', async (req: Request, res: Response) => {
+router.get('/transactions', requireReadAccess, async (req: Request, res: Response) => {
   const parsed = adminTransactionsQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     return res.status(400).json({
@@ -369,7 +374,7 @@ const purgeTomlCacheSchema = z.object({
  *                   type: integer
  *                   description: Number of cache entries removed
  */
-router.post('/cache/purge-toml', validate({ body: purgeCacheSchema }), async (req: Request, res: Response) => {
+router.post('/cache/purge-toml', requireWriteAccess, validate({ body: purgeCacheSchema }), async (req: Request, res: Response) => {
   const parsed = purgeTomlCacheSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({
@@ -442,7 +447,7 @@ const auditLogsQuerySchema = z.object({
  *       400:
  *         description: Invalid query parameters
  */
-router.get('/audit-logs', async (req: Request, res: Response) => {
+router.get('/audit-logs', requireReadAccess, async (req: Request, res: Response) => {
   const parsed = auditLogsQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     return res.status(400).json({
@@ -525,7 +530,7 @@ const dlqListQuerySchema = z.object({
   end: z.coerce.number().int().min(0).default(49),
 });
 
-router.get('/queues/notification-dlq', async (req: Request, res: Response) => {
+router.get('/queues/notification-dlq', requireReadAccess, async (req: Request, res: Response) => {
   const parsed = dlqListQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     return res.status(400).json({
@@ -575,7 +580,7 @@ router.get('/queues/notification-dlq', async (req: Request, res: Response) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.post('/queues/notification-dlq/:jobId/retry', async (req: Request, res: Response) => {
+router.post('/queues/notification-dlq/:jobId/retry', requireWriteAccess, async (req: Request, res: Response) => {
   try {
     const retried = await retryNotificationDlqJob(req.params.jobId);
     if (!retried) {
