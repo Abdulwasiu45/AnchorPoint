@@ -11,6 +11,7 @@ import {
 import prisma from '../../lib/prisma';
 import { isValidStellarPublicKey } from '../../utils/stellar-address';
 import { sep24MetricsMiddleware } from '../middleware/sep24-metrics.middleware';
+import { sepFlowMetricsMiddleware } from '../middleware/sep-flow-metrics.middleware';
 import { Sep24Service, Sep24MemoType } from '../../services/sep24.service';
 import { FeeService } from '../../services/fee.service';
 import { RedisService } from '../../services/redis.service';
@@ -22,6 +23,7 @@ const router = Router();
 export const sep24StatusChannel = (id: string): string => `sep24:tx:${id}`;
 
 router.use(sep24MetricsMiddleware);
+router.use(sepFlowMetricsMiddleware('sep24'));
 
 // ─── Fee service (share mock Redis pattern used in fee.route.ts) ──────────────
 const mockRedisClient = {

@@ -40,13 +40,14 @@ import { publicLimiter, authLimiter } from './api/middleware/rate-limit.middlewa
 import { notificationService } from './services/notification.service';
 import { createEmailProvider, createSmsProvider, createPushProvider } from './lib/notifications/providers';
 import { NotificationType } from './services/notification.service';
-import { validateKmsConfigOnStartup, verifyDecryptionCapabilityOnStartup } from './lib/key-management.service';
+import { validateKmsConfigOnStartup, verifyDecryptionCapabilityOnStartup, getKeyManagementService } from './lib/key-management.service';
 import queueDashboardRouter, { dashboardQueues } from './api/routes/queue-dashboard.route';
 import prisma from './lib/prisma';
 import { redis } from './lib/redis';
 import { validateStorageConfigOnStartup } from './services/storage-provider.service';
 import { uploadExpiryScheduler } from './workers/upload-expiry.scheduler';
 import { dbMetricsScheduler } from './workers/db-metrics.scheduler';
+import { transactionReconcileScheduler } from './workers/transaction-reconcile.scheduler';
 import { initSocket } from './lib/socket';
 import { kycExpiryScheduler } from './workers/kyc-expiry.scheduler';
 import { dataRetentionScheduler } from './workers/data-retention.scheduler';
@@ -79,6 +80,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   dataRetentionScheduler.stop();
   cleanupWorker.stop();
   dbMetricsScheduler.stop();
+  transactionReconcileScheduler.stop();
 
   // Stop accepting new HTTP traffic; let in-flight requests finish.
   if (server) {
@@ -212,7 +214,7 @@ app.get('/', (req: Request, res: Response) => {
  * /health:
  *   get:
  *     summary: Health check
- *     description: Check if the API server and its backend dependencies (database, Redis, Soroban RPC, Horizon) are running
+ *     description: Check if the API server and its backend dependencies (database, Redis, Soroban RPC, Horizon, KMS, KYC provider) are running
  *     tags: [Health]
  *     responses:
  *       200:
@@ -243,6 +245,12 @@ app.get('/', (req: Request, res: Response) => {
  *                     horizon:
  *                       type: string
  *                       example: UP
+ *                     kms:
+ *                       type: string
+ *                       example: UP
+ *                     kycProvider:
+ *                       type: string
+ *                       example: UP
  *       503:
  *         description: One or more backend dependencies are down
  *         content:
@@ -271,17 +279,38 @@ app.get('/', (req: Request, res: Response) => {
  *                     horizon:
  *                       type: string
  *                       example: DOWN
+ *                     kms:
+ *                       type: string
+ *                       example: UP
+ *                     kycProvider:
+ *                       type: string
+ *                       example: UP
  */
+const HEALTH_CHECK_TIMEOUT_MS = 2000;
+
+function withHealthTimeout<T>(promise: Promise<T>, name: string): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${name} health check timed out after ${HEALTH_CHECK_TIMEOUT_MS}ms`)),
+      HEALTH_CHECK_TIMEOUT_MS
+    );
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 app.get('/health', async (req: Request, res: Response) => {
   let dbStatus = 'UP';
   let redisStatus = 'UP';
   let redisLatency = 0;
   let sorobanRpcStatus = 'UP';
   let horizonStatus = 'UP';
+  let kmsStatus = 'UP';
+  let kycProviderStatus = 'UP';
   let isHealthy = true;
 
   try {
-    await prisma.$queryRaw`SELECT 1`;
+    await withHealthTimeout(prisma.$queryRaw`SELECT 1`, 'Database');
   } catch (err) {
     dbStatus = 'DOWN';
     isHealthy = false;
@@ -290,7 +319,7 @@ app.get('/health', async (req: Request, res: Response) => {
 
   try {
     const start = Date.now();
-    const pong = await redis.ping();
+    const pong = await withHealthTimeout(redis.ping(), 'Redis');
     if (pong !== 'PONG') {
       redisStatus = 'DOWN';
       isHealthy = false;
@@ -304,7 +333,7 @@ app.get('/health', async (req: Request, res: Response) => {
   }
 
   try {
-    const rpcHealth = await stellarService.getHealth();
+    const rpcHealth = await withHealthTimeout(stellarService.getHealth(), 'Soroban RPC');
     sorobanRpcStatus = rpcHealth.status;
     if (rpcHealth.status === 'DOWN') {
       isHealthy = false;
@@ -316,7 +345,7 @@ app.get('/health', async (req: Request, res: Response) => {
   }
 
   try {
-    const horizonHealth = await stellarService.getHorizonHealth();
+    const horizonHealth = await withHealthTimeout(stellarService.getHorizonHealth(), 'Horizon');
     horizonStatus = horizonHealth.status;
     if (horizonHealth.status === 'DOWN') {
       isHealthy = false;
@@ -327,6 +356,42 @@ app.get('/health', async (req: Request, res: Response) => {
     logger.error('Health Check - Horizon connection failed:', err);
   }
 
+  let kmsService: ReturnType<typeof getKeyManagementService> | null = null;
+  try {
+    kmsService = getKeyManagementService();
+  } catch {
+    // Key management is optional; report it as not configured rather than failing.
+    kmsStatus = 'NOT_CONFIGURED';
+  }
+  if (kmsService) {
+    try {
+      const kmsHealthy = await withHealthTimeout(kmsService.isHealthy(), 'KMS');
+      if (!kmsHealthy) {
+        kmsStatus = 'DOWN';
+        isHealthy = false;
+      }
+    } catch (err) {
+      kmsStatus = 'DOWN';
+      isHealthy = false;
+      logger.error('Health Check - KMS connection failed:', err);
+    }
+  }
+
+  // The KYC provider is an external third party, so it is reported but not treated as critical.
+  const kycProviderUrls: Record<string, string> = {
+    persona: config.PERSONA_API_URL,
+    shufti: config.SHUFTI_API_URL,
+  };
+  const kycProviderUrl = kycProviderUrls[config.KYC_PROVIDER];
+  if (kycProviderUrl) {
+    try {
+      await withHealthTimeout(fetch(kycProviderUrl, { method: 'HEAD' }), 'KYC provider');
+    } catch (err) {
+      kycProviderStatus = 'DOWN';
+      logger.error('Health Check - KYC provider connection failed:', err);
+    }
+  }
+
   const responsePayload = {
     status: isHealthy ? 'UP' : 'DOWN',
     timestamp: new Date().toISOString(),
@@ -335,6 +400,8 @@ app.get('/health', async (req: Request, res: Response) => {
       redis: { status: redisStatus, latencyMs: redisLatency },
       sorobanRpc: sorobanRpcStatus,
       horizon: horizonStatus,
+      kms: kmsStatus,
+      kycProvider: kycProviderStatus,
     },
   };
 
@@ -466,6 +533,7 @@ if (process.env.NODE_ENV !== 'test') {
           kycExpiryScheduler.start();
           dataRetentionScheduler.start();
           dbMetricsScheduler.start();
+          transactionReconcileScheduler.start();
           cleanupWorker.start();
         });
       });
