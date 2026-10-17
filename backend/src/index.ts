@@ -185,7 +185,13 @@ const corsOptions = {
   optionsSuccessStatus: 200,
 };
 app.use(cors(corsOptions));
-app.use(express.json());
+app.use(
+  express.json({
+    verify: (req: Request & { rawBody?: string }, _res: Response, buf: Buffer) => {
+      req.rawBody = buf.toString('utf8');
+    },
+  }),
+);
 app.use(express.urlencoded({ extended: true }));
 app.use(sanitizeRequestMiddleware);
 
@@ -509,6 +515,7 @@ if (process.env.NODE_ENV !== 'test') {
       STELLAR_FEE_BUMP_SECRET: process.env.STELLAR_FEE_BUMP_SECRET,
       RELAYER_SECRET_KEY: process.env.RELAYER_SECRET_KEY,
       WEBHOOK_SECRET: process.env.WEBHOOK_SECRET,
+      HORIZON_WEBHOOK_SECRET: process.env.HORIZON_WEBHOOK_SECRET,
       SIGNING_KEY: process.env.SIGNING_KEY,
     });
 
