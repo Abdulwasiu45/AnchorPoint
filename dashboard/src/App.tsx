@@ -29,7 +29,7 @@ import { NetworkSelector, NetworkBanner } from './components/NetworkSelector';
 import { NetworkProvider } from './contexts/NetworkContext';
 import { SessionTimeoutModal } from './components/Auth/SessionTimeoutModal';
 import { WalletManager } from './lib/wallet';
-import { I18nProvider, useTranslation } from './i18n/config';
+import { I18nProvider, useTranslation, type Language } from './i18n/config';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 
 export { useTheme };
@@ -434,13 +434,15 @@ const AppShell = () => {
               <select
                 aria-label={t('language.label')}
                 value={language}
-                onChange={(event) => changeLanguage(event.target.value as 'en' | 'es' | 'pt' | 'fr')}
+                onChange={(event) => changeLanguage(event.target.value as Language)}
                 className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-sm text-slate-200"
               >
                 <option value="en">{t('language.en')}</option>
                 <option value="es">{t('language.es')}</option>
                 <option value="pt">{t('language.pt')}</option>
                 <option value="fr">{t('language.fr')}</option>
+                <option value="ar">{t('language.ar') || 'العربية'}</option>
+                <option value="he">{t('language.he') || 'עברית'}</option>
               </select>
               <NetworkSelector />
               <UserAvatarDropdown
